@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 import time
 import threading
 import os
@@ -7,15 +6,16 @@ from flask import Flask
 
 app = Flask(__name__)
 
-# ================= 설정 값 입력 =================
+# ================= 설정 값 =================
 TELEGRAM_TOKEN = "8870775774:AAH7uofm_bvfkHB-1kUL5_TGP42mJS2mpA4"
 CHAT_ID = "523461892"
 
-# 껍데기 주소가 아닌, 게시글 목록만 있는 실제 내부 iframe 주소로 변경
+# 테스트 카페 (맘이베베로 복귀하시려면 CLUB_ID="29434212", MENU_ID="2" 로 변경)
 CLUB_ID = "31731163"
 MENU_ID = "1"
-CAFE_URL = f"https://cafe.naver.com/ArticleList.nhn?search.clubid={CLUB_ID}&search.menuid={MENU_ID}&search.boardtype=L"
-# ===============================================
+
+API_URL = f"https://apis.naver.com/cafe-web/cafe2/ArticleList.json?search.clubid={CLUB_ID}&search.queryType=lastArticle&search.menuid={MENU_ID}&search.page=1&search.perPage=15"
+# ===========================================
 
 sent_articles = set()
 
@@ -29,48 +29,30 @@ def send_telegram_message(text):
         print("텔레그램 전송 실패:", e)
 
 def check_hotdeal(is_first_run=False):
-    """핫딜 크롤링 함수"""
+    """게시글 목록 데이터 수집"""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15"
     }
     
     try:
-        response = requests.get(CAFE_URL, headers=headers)
+        response = requests.get(API_URL, headers=headers)
         if response.status_code != 200:
-            print(f"페이지 로딩 실패: {response.status_code}")
             return
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        rows = soup.select('.article-board .article-table tbody tr')
-        
-        if len(rows) == 0:
-            print("게시글을 가져오지 못했습니다. (접근 권한 없음 또는 차단)")
-            return
+        data = response.json()
+        article_list = data.get('message', {}).get('result', {}).get('articleList', [])
 
-        for row in reversed(rows):
-            if 'board-notice' in row.get('class', []):
+        for article in reversed(article_list):
+            if article.get('type') != 'ARTICLE':
                 continue
 
-            article_num_tag = row.select_one('.type_articleNumber')
-            if not article_num_tag:
-                continue
-            article_num = article_num_tag.text.strip()
-
+            article_num = str(article.get('articleId'))
             if article_num in sent_articles:
                 continue
-
-            title_tag = row.select_one('.inner_list .article')
-            if not title_tag:
-                continue
             
-            title = title_tag.text.strip()
-            link = title_tag['href']
-            
-            # 주소가 상대경로(/)로 시작할 경우 완전한 URL로 조립
-            if link.startswith('/'):
-                link = "https://cafe.naver.com" + link
+            title = article.get('subject')
+            link = f"https://m.cafe.naver.com/ca-fe/web/cafes/{CLUB_ID}/articles/{article_num}"
 
-            # 최초 실행(is_first_run=True)이 아닐 때만 알림 전송
             if not is_first_run:
                 message = f"🚨 *새로운 게시글 등장!*\n\n📌 {title}\n🔗 [게시글 바로가기]({link})"
                 send_telegram_message(message)
@@ -82,26 +64,22 @@ def check_hotdeal(is_first_run=False):
         print("조회 중 에러 발생:", e)
 
 def run_bot():
-    """백그라운드에서 60초마다 무한 반복하는 함수"""
-    print("서버 가동: 기존 게시글 목록을 기억합니다...")
+    """백그라운드에서 60초마다 무한 반복"""
+    print("서버 가동: 목록 데이터 전용 수집기 실행")
     check_hotdeal(is_first_run=True)
-    print(f"초기화 완료. 현재 {len(sent_articles)}개의 글이 인식되었습니다.")
     
     while True:
         time.sleep(60)
         check_hotdeal(is_first_run=False)
 
-# Web Service가 정상 작동하는지 확인하기 위한 기본 주소
 @app.route('/')
 def keep_alive():
-    return "알림 봇이 정상 작동 중입니다!"
+    return "목록 수집 알림 봇이 정상 작동 중입니다!"
 
 if __name__ == "__main__":
-    # 크롤러를 백그라운드 스레드로 분리하여 실행
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.daemon = True
     bot_thread.start()
     
-    # Flask 웹 서버 실행
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
