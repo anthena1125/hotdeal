@@ -10,7 +10,7 @@ app = Flask(__name__)
 # ================= 설정 값 입력 =================
 TELEGRAM_TOKEN = "8870775774:AAH7uofm_bvfkHB-1kUL5_TGP42mJS2mpA4"
 CHAT_ID = "523461892"
-CAFE_URL = "https://cafe.naver.com/f-e/cafes/29434212/menus/2?viewType=L"
+CAFE_URL = "https://cafe.naver.com/f-e/cafes/31731163/menus/1?viewType=L"
 # ===============================================
 
 sent_articles = set()
