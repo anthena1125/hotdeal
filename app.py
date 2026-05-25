@@ -10,7 +10,6 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8870775774:AAH7uofm_bvfkHB-1kUL5_TGP42mJS2mpA4"
 CHAT_ID = "523461892"
 
-# 테스트 카페 (맘이베베로 복귀하시려면 CLUB_ID="29434212", MENU_ID="2" 로 변경)
 CLUB_ID = "31731163"
 MENU_ID = "1"
 
@@ -29,18 +28,29 @@ def send_telegram_message(text):
         print("텔레그램 전송 실패:", e)
 
 def check_hotdeal(is_first_run=False):
-    """게시글 목록 데이터 수집"""
+    # 봇 차단을 우회하기 위한 필수 헤더(Referer) 추가 (네이버 카페 앱에서 접속한 것처럼 위장)
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
+        "Referer": f"https://m.cafe.naver.com/ca-fe/web/cafes/{CLUB_ID}/menus/{MENU_ID}",
+        "Accept": "application/json, text/plain, */*"
     }
     
     try:
+        print("\n--- 네이버 서버에 데이터 요청 중 ---")
         response = requests.get(API_URL, headers=headers)
+        print(f"[디버그] 네이버 응답 상태 코드: {response.status_code}")
+        
         if response.status_code != 200:
+            print(f"[디버그] 접근 거부됨. 네이버의 답변: {response.text[:300]}")
             return
 
         data = response.json()
         article_list = data.get('message', {}).get('result', {}).get('articleList', [])
+        
+        print(f"[디버그] 현재 네이버에서 읽어온 게시글 수: {len(article_list)}개")
+
+        if len(article_list) == 0:
+            print("[디버그] 경고: 접속은 성공했으나 게시글이 없습니다. (게시판이 비어있거나 권한 차단)")
 
         for article in reversed(article_list):
             if article.get('type') != 'ARTICLE':
@@ -61,11 +71,10 @@ def check_hotdeal(is_first_run=False):
             sent_articles.add(article_num)
 
     except Exception as e:
-        print("조회 중 에러 발생:", e)
+        print(f"[디버그] 조회 중 치명적 에러 발생: {e}")
 
 def run_bot():
-    """백그라운드에서 60초마다 무한 반복"""
-    print("서버 가동: 목록 데이터 전용 수집기 실행")
+    print("서버 가동: 정밀 진단 모드 실행 중...")
     check_hotdeal(is_first_run=True)
     
     while True:
@@ -74,7 +83,7 @@ def run_bot():
 
 @app.route('/')
 def keep_alive():
-    return "목록 수집 알림 봇이 정상 작동 중입니다!"
+    return "알림 봇 정밀 진단 모드 가동 중!"
 
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot)
