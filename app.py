@@ -2,7 +2,8 @@ import requests
 import time
 import threading
 import os
-import xml.etree.ElementTree as ET
+import urllib.parse
+import json
 from flask import Flask
 
 app = Flask(__name__)
@@ -14,8 +15,12 @@ CHAT_ID = "523461892"
 CLUB_ID = "31731163"
 MENU_ID = "1"
 
-# API가 아닌, 데이터센터 IP 접근이 허용되는 RSS 피드 주소로 우회
-RSS_URL = f"https://cafe.rss.naver.com/ArticleList.nhn?search.clubid={CLUB_ID}&search.menuid={MENU_ID}"
+# 원래 요청하려던 네이버 API 주소
+NAVER_API_URL = f"https://apis.naver.com/cafe-web/cafe2/ArticleList.json?search.clubid={CLUB_ID}&search.queryType=lastArticle&search.menuid={MENU_ID}&search.page=1&search.perPage=15"
+
+# 네이버 API 주소를 암호화하여 무료 프록시(AllOrigins) 주소 뒤에 합성
+ENCODED_URL = urllib.parse.quote(NAVER_API_URL)
+PROXY_URL = f"https://api.allorigins.win/get?url={ENCODED_URL}"
 # ===========================================
 
 sent_articles = set()
@@ -34,44 +39,50 @@ def check_hotdeal(is_first_run=False):
     }
     
     try:
-        print("\n--- RSS 피드 우회 요청 중 ---")
-        response = requests.get(RSS_URL, headers=headers)
+        print("\n--- 프록시 우회 서버를 통해 네이버 접속 중 ---")
+        # 네이버가 아닌 우회 서버로 요청을 보냄
+        response = requests.get(PROXY_URL, headers=headers, timeout=15)
         
         if response.status_code != 200:
-            print(f"[디버그] RSS 접근 거부됨 (상태 코드: {response.status_code})")
+            print(f"[디버그] 프록시 서버 응답 실패: {response.status_code}")
             return
 
-        # HTML이 아닌 XML(RSS) 데이터 파싱
-        root = ET.fromstring(response.content)
-        items = root.findall('.//item')
+        # 우회 서버가 가져온 데이터의 'contents' 부분을 추출하여 JSON으로 변환
+        proxy_data = response.json()
+        naver_response_text = proxy_data.get('contents', '{}')
+        data = json.loads(naver_response_text)
         
-        print(f"[디버그] RSS에서 읽어온 게시글 수: {len(items)}개")
+        article_list = data.get('message', {}).get('result', {}).get('articleList', [])
+        print(f"[디버그] 우회 성공! 가져온 게시글 수: {len(article_list)}개")
 
-        # 최신 글이 위에 있으므로 역순으로 처리하여 과거 글부터 알림
-        for item in reversed(items):
-            title = item.find('title').text
-            link = item.find('link').text
-            
-            # 고유 식별자로 링크 자체를 활용
-            if link in sent_articles:
+        if len(article_list) == 0:
+            return
+
+        for article in reversed(article_list):
+            if article.get('type') != 'ARTICLE':
                 continue
 
+            article_num = str(article.get('articleId'))
+            if article_num in sent_articles:
+                continue
+            
+            title = article.get('subject')
+            link = f"https://m.cafe.naver.com/ca-fe/web/cafes/{CLUB_ID}/articles/{article_num}"
+
             if not is_first_run:
-                # 텔레그램 마크다운 에러 방지를 위해 특수문자 제거
+                # 마크다운 에러 방지를 위한 텍스트 정제
                 clean_title = title.replace('[', '').replace(']', '').replace('*', '')
                 message = f"🚨 *새로운 게시글 등장!*\n\n📌 {clean_title}\n🔗 [게시글 바로가기]({link})"
                 send_telegram_message(message)
                 print(f"[알림 전송 완료] {clean_title}")
 
-            sent_articles.add(link)
+            sent_articles.add(article_num)
 
-    except ET.ParseError:
-        print("[디버그] 에러: 가져온 데이터가 RSS 형식이 아닙니다. (네이버 방화벽이 HTML 차단 창을 띄움)")
     except Exception as e:
-        print(f"[디버그] RSS 파싱 중 알 수 없는 에러 발생: {e}")
+        print(f"[디버그] 프록시 통신 에러 발생: {e}")
 
 def run_bot():
-    print("서버 가동: RSS 피드 우회 모드 실행 중...")
+    print("서버 가동: IP 우회 프록시 모드 실행 중...")
     check_hotdeal(is_first_run=True)
     
     while True:
@@ -80,7 +91,7 @@ def run_bot():
 
 @app.route('/')
 def keep_alive():
-    return "RSS 기반 우회 봇 가동 중!"
+    return "Render 프록시 우회 알림 봇 작동 중!"
 
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot)
