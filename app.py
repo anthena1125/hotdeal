@@ -8,8 +8,8 @@ from flask import Flask
 app = Flask(__name__)
 
 # ================= 설정 값 입력 =================
-TELEGRAM_TOKEN = "여기에_봇_토큰_입력"
-CHAT_ID = "여기에_채팅_ID_입력"
+TELEGRAM_TOKEN = "8870775774:AAH7uofm_bvfkHB-1kUL5_TGP42mJS2mpA4"
+CHAT_ID = "523461892"
 CAFE_URL = "https://cafe.naver.com/f-e/cafes/29434212/menus/2?viewType=L"
 # ===============================================
 
