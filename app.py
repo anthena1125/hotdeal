@@ -2,6 +2,7 @@ import requests
 import time
 import threading
 import os
+import xml.etree.ElementTree as ET
 from flask import Flask
 
 app = Flask(__name__)
@@ -13,13 +14,13 @@ CHAT_ID = "523461892"
 CLUB_ID = "31731163"
 MENU_ID = "1"
 
-API_URL = f"https://apis.naver.com/cafe-web/cafe2/ArticleList.json?search.clubid={CLUB_ID}&search.queryType=lastArticle&search.menuid={MENU_ID}&search.page=1&search.perPage=15"
+# API가 아닌, 데이터센터 IP 접근이 허용되는 RSS 피드 주소로 우회
+RSS_URL = f"https://cafe.rss.naver.com/ArticleList.nhn?search.clubid={CLUB_ID}&search.menuid={MENU_ID}"
 # ===========================================
 
 sent_articles = set()
 
 def send_telegram_message(text):
-    """텔레그램 전송 함수"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
     try:
@@ -28,53 +29,49 @@ def send_telegram_message(text):
         print("텔레그램 전송 실패:", e)
 
 def check_hotdeal(is_first_run=False):
-    # 봇 차단을 우회하기 위한 필수 헤더(Referer) 추가 (네이버 카페 앱에서 접속한 것처럼 위장)
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
-        "Referer": f"https://m.cafe.naver.com/ca-fe/web/cafes/{CLUB_ID}/menus/{MENU_ID}",
-        "Accept": "application/json, text/plain, */*"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     
     try:
-        print("\n--- 네이버 서버에 데이터 요청 중 ---")
-        response = requests.get(API_URL, headers=headers)
-        print(f"[디버그] 네이버 응답 상태 코드: {response.status_code}")
+        print("\n--- RSS 피드 우회 요청 중 ---")
+        response = requests.get(RSS_URL, headers=headers)
         
         if response.status_code != 200:
-            print(f"[디버그] 접근 거부됨. 네이버의 답변: {response.text[:300]}")
+            print(f"[디버그] RSS 접근 거부됨 (상태 코드: {response.status_code})")
             return
 
-        data = response.json()
-        article_list = data.get('message', {}).get('result', {}).get('articleList', [])
+        # HTML이 아닌 XML(RSS) 데이터 파싱
+        root = ET.fromstring(response.content)
+        items = root.findall('.//item')
         
-        print(f"[디버그] 현재 네이버에서 읽어온 게시글 수: {len(article_list)}개")
+        print(f"[디버그] RSS에서 읽어온 게시글 수: {len(items)}개")
 
-        if len(article_list) == 0:
-            print("[디버그] 경고: 접속은 성공했으나 게시글이 없습니다. (게시판이 비어있거나 권한 차단)")
-
-        for article in reversed(article_list):
-            if article.get('type') != 'ARTICLE':
-                continue
-
-            article_num = str(article.get('articleId'))
-            if article_num in sent_articles:
-                continue
+        # 최신 글이 위에 있으므로 역순으로 처리하여 과거 글부터 알림
+        for item in reversed(items):
+            title = item.find('title').text
+            link = item.find('link').text
             
-            title = article.get('subject')
-            link = f"https://m.cafe.naver.com/ca-fe/web/cafes/{CLUB_ID}/articles/{article_num}"
+            # 고유 식별자로 링크 자체를 활용
+            if link in sent_articles:
+                continue
 
             if not is_first_run:
-                message = f"🚨 *새로운 게시글 등장!*\n\n📌 {title}\n🔗 [게시글 바로가기]({link})"
+                # 텔레그램 마크다운 에러 방지를 위해 특수문자 제거
+                clean_title = title.replace('[', '').replace(']', '').replace('*', '')
+                message = f"🚨 *새로운 게시글 등장!*\n\n📌 {clean_title}\n🔗 [게시글 바로가기]({link})"
                 send_telegram_message(message)
-                print(f"[알림 전송 완료] {title}")
+                print(f"[알림 전송 완료] {clean_title}")
 
-            sent_articles.add(article_num)
+            sent_articles.add(link)
 
+    except ET.ParseError:
+        print("[디버그] 에러: 가져온 데이터가 RSS 형식이 아닙니다. (네이버 방화벽이 HTML 차단 창을 띄움)")
     except Exception as e:
-        print(f"[디버그] 조회 중 치명적 에러 발생: {e}")
+        print(f"[디버그] RSS 파싱 중 알 수 없는 에러 발생: {e}")
 
 def run_bot():
-    print("서버 가동: 정밀 진단 모드 실행 중...")
+    print("서버 가동: RSS 피드 우회 모드 실행 중...")
     check_hotdeal(is_first_run=True)
     
     while True:
@@ -83,7 +80,7 @@ def run_bot():
 
 @app.route('/')
 def keep_alive():
-    return "알림 봇 정밀 진단 모드 가동 중!"
+    return "RSS 기반 우회 봇 가동 중!"
 
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot)
