@@ -3,7 +3,6 @@ import time
 import threading
 import os
 import urllib.parse
-import json
 from flask import Flask
 
 app = Flask(__name__)
@@ -18,9 +17,8 @@ MENU_ID = "1"
 # 원래 요청하려던 네이버 API 주소
 NAVER_API_URL = f"https://apis.naver.com/cafe-web/cafe2/ArticleList.json?search.clubid={CLUB_ID}&search.queryType=lastArticle&search.menuid={MENU_ID}&search.page=1&search.perPage=15"
 
-# 네이버 API 주소를 암호화하여 무료 프록시(AllOrigins) 주소 뒤에 합성
-ENCODED_URL = urllib.parse.quote(NAVER_API_URL)
-PROXY_URL = f"https://api.allorigins.win/get?url={ENCODED_URL}"
+# 다른 무료 프록시(CorsProxy)로 교체
+PROXY_URL = f"https://corsproxy.io/?{urllib.parse.quote(NAVER_API_URL)}"
 # ===========================================
 
 sent_articles = set()
@@ -39,19 +37,15 @@ def check_hotdeal(is_first_run=False):
     }
     
     try:
-        print("\n--- 프록시 우회 서버를 통해 네이버 접속 중 ---")
-        # 네이버가 아닌 우회 서버로 요청을 보냄
+        print("\n--- 새 프록시(CorsProxy) 서버를 통해 네이버 접속 중 ---")
         response = requests.get(PROXY_URL, headers=headers, timeout=15)
         
         if response.status_code != 200:
             print(f"[디버그] 프록시 서버 응답 실패: {response.status_code}")
             return
 
-        # 우회 서버가 가져온 데이터의 'contents' 부분을 추출하여 JSON으로 변환
-        proxy_data = response.json()
-        naver_response_text = proxy_data.get('contents', '{}')
-        data = json.loads(naver_response_text)
-        
+        # CorsProxy는 원본 데이터를 반환하므로 바로 JSON 파싱
+        data = response.json()
         article_list = data.get('message', {}).get('result', {}).get('articleList', [])
         print(f"[디버그] 우회 성공! 가져온 게시글 수: {len(article_list)}개")
 
@@ -70,7 +64,6 @@ def check_hotdeal(is_first_run=False):
             link = f"https://m.cafe.naver.com/ca-fe/web/cafes/{CLUB_ID}/articles/{article_num}"
 
             if not is_first_run:
-                # 마크다운 에러 방지를 위한 텍스트 정제
                 clean_title = title.replace('[', '').replace(']', '').replace('*', '')
                 message = f"🚨 *새로운 게시글 등장!*\n\n📌 {clean_title}\n🔗 [게시글 바로가기]({link})"
                 send_telegram_message(message)
@@ -82,7 +75,7 @@ def check_hotdeal(is_first_run=False):
         print(f"[디버그] 프록시 통신 에러 발생: {e}")
 
 def run_bot():
-    print("서버 가동: IP 우회 프록시 모드 실행 중...")
+    print("서버 가동: 새 IP 우회 프록시 모드 실행 중...")
     check_hotdeal(is_first_run=True)
     
     while True:
@@ -91,7 +84,7 @@ def run_bot():
 
 @app.route('/')
 def keep_alive():
-    return "Render 프록시 우회 알림 봇 작동 중!"
+    return "Render 새 프록시 우회 봇 작동 중!"
 
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot)
